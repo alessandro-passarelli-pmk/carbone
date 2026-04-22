@@ -265,14 +265,13 @@ function imageOdt (d, width, height) {
   var _width  = width  || '5cm';
   var _height = height || '3cm';
 
-  // Un-escape XML entities that may have been applied before this formatter runs
-  var _uri = d.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
-
-  if (!_uri.startsWith('data:')) {
+  // base64 data URIs only contain A-Za-z0-9+/= and the literal text "data:",
+  // so no XML un-escaping is needed here.
+  if (!d.startsWith('data:')) {
     return d;
   }
 
-  var _match = /^data:([^;]+);base64,(.+)$/.exec(_uri);
+  var _match = /^data:([^;]+);base64,([A-Za-z0-9+/=]+)$/.exec(d);
   if (!_match) {
     return d;
   }
@@ -282,7 +281,7 @@ function imageOdt (d, width, height) {
   var _ext      = MIME_TO_EXT[_mimeType] || 'png';
 
   // Generate a unique filename to avoid collisions
-  var _seed     = _base64.slice(0, 64) + Date.now().toString(36) + Math.random().toString(36);
+  var _seed     = _base64.slice(0, 64) + Date.now().toString(36) + crypto.randomBytes(6).toString('hex');
   var _hash     = crypto.createHash('md5').update(_seed).digest('hex').slice(0, 12);
   var _filename = 'Pictures/carbone_' + _hash + '.' + _ext;
 
@@ -327,13 +326,18 @@ function barcodeOdt (d, width, height) {
   var _width  = width  || '5cm';
   var _height = height || '1.5cm';
 
-  // Un-escape XML entities then convert to string
-  var _text = String(d)
-    .replace(/&amp;/g, '&')
+  // Convert to string. The value arrives after Carbone's XML-escaping step
+  // (e.g. "&" becomes "&amp;"), but since the text is fed into Code 128B
+  // encoding (not injected as XML), we decode the common XML entities so the
+  // barcode reflects the original value.
+  var _raw  = String(d);
+  var _text = _raw
+    .replace(/&amp;/g, '\x00AMP\x00')   // placeholder to avoid double-decoding
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'");
+    .replace(/&apos;/g, "'")
+    .replace(/\x00AMP\x00/g, '&');
 
   var _bits;
   try {
@@ -341,12 +345,12 @@ function barcodeOdt (d, width, height) {
   }
   catch (e) {
     // Unsupported characters – return plain text
-    return String(d);
+    return _raw;
   }
 
   var _svg = bitsToSvg(_bits, 80);
 
-  var _seed     = _text + Date.now().toString(36) + Math.random().toString(36);
+  var _seed     = _text + Date.now().toString(36) + crypto.randomBytes(6).toString('hex');
   var _hash     = crypto.createHash('md5').update(_seed).digest('hex').slice(0, 12);
   var _filename = 'Pictures/barcode_' + _hash + '.svg';
 
